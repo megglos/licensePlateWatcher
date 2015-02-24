@@ -7,22 +7,49 @@ from tkinter import *
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from collections import deque
+from datetime import datetime
+import time
+import os
+from apscheduler.schedulers.background import BackgroundScheduler
 
-class ReadLastRowOnModified(FileSystemEventHandler):
-    def __init__(self, pattern, stringVar):
-        self.prog = re.compile(pattern);
-        self.stringVar = stringVar;
+class LastRowReader():
 
     @staticmethod
-    def get_last_row(csv_filename):
-        with open(csv_filename, 'rt') as f:
+    def get_last_row():
+        with open(self.fileName, 'rt') as f:
             return deque(csv.reader(f, delimiter=";"), 1)[0]
 
-    def on_modified(self, event):
-        if self.prog.match(event.src_path):
-            newEntry = self.get_last_row(event.src_path)[2];
-            print(newEntry)
-            self.stringVar.set(newEntry);
+    def readFirstRow(self):
+        print(self.fileName)
+        self.last_pos = 0
+        with open(self.fileName, 'rt') as f:
+            for line in f:
+                self.last_pos+=1
+        with open(self.fileName, 'rt') as f:
+            value = deque(csv.reader(f, delimiter=";"), 1)[0]
+            self.plateVar.set(value[2])
+
+    def readNewRow(self):
+        count = 0
+        with open(self.fileName, 'rt') as f:
+            for line in f:
+                count+=1
+        if count > self.last_pos:
+            self.last_pos = count
+        with open(self.fileName, 'rt') as f:
+            value = deque(csv.reader(f, delimiter=";"), 1)[0]
+            self.plateVar.set(value[2])
+
+    def __call__(self):
+        self.readNewRow()
+        self.countVar.set(self.last_pos)
+
+    def __init__(self, fileName, plateVar, countVar):
+        self.fileName = fileName
+        self.plateVar = plateVar
+        self.countVar = countVar
+        self.readFirstRow()
+        self.countVar.set(self.last_pos)
 
 if __name__ == "__main__":
     path = sys.argv[1] if len(sys.argv) > 1 else '.'
@@ -32,25 +59,26 @@ if __name__ == "__main__":
     root = Tk()
     canvas = Canvas(root, width=width, height=height, bg=bg)
     canvas.pack(expand=YES, fill=BOTH) 
-
+    countText = StringVar()
     plateText = StringVar()
-    #plateText.set("test")
-    event_handler = ReadLastRowOnModified(".*\.csv", plateText)
-
-    observer = Observer()
-    observer.schedule(event_handler, path, recursive=True)
-    observer.start()
-
     plateLabel = Label(canvas, text="Nummernschild", font = "Arial 44 bold", justify="center", bg=bg, fg=fg)
     plateLabel.pack()
     plateValue = Label(canvas, textvariable=plateText, font = "Arial 56", justify="center", bg=bg, fg=fg)
     plateValue.pack()
+    countValue = Label(canvas, textvariable=countText, font = "Arial 56", justify="center", bg=bg, fg=fg)
+    countValue.pack()
     canvas.create_window(width/2, height-160, window=plateLabel)
     canvas.create_window(width/2, height-88, window=plateValue)
-    root.mainloop()
+    canvas.create_window(50, 50, window=countValue)
+
+    reader = LastRowReader("csv.csv", plateText, countText)
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(reader, 'interval', seconds=3)
+    scheduler.start()
+
+    print('Press Ctrl+{0} to exit'.format('Break' if os.name == 'nt' else 'C'))
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
+        root.mainloop()
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()  # Not strictly necessary if daemonic mode is enabled but should be done if possible
